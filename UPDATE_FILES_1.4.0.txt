@@ -1,0 +1,23 @@
+NetGuard 1.4.0 - arquivos do update
+
+.env.example
+docker-compose.yml
+RELEASE_NOTES_1.4.0_LOGS.md
+UPDATE_FILES_1.4.0.txt
+docs/LOGS_SYSLOG.md
+backend/app/config.py
+backend/app/main.py
+backend/app/api/v1/router.py
+backend/app/api/v1/endpoints/logs.py
+backend/app/models/__init__.py
+backend/app/models/log.py
+backend/app/schemas/log.py
+backend/app/services/log_service.py
+backend/app/services/syslog_service.py
+backend/app/tasks/__init__.py
+backend/app/tasks/alert_tasks.py
+backend/tests/test_syslog_service.py
+frontend/src/App.tsx
+frontend/src/components/layout/Sidebar.tsx
+frontend/src/pages/SyslogPage.tsx
+frontend/dist/

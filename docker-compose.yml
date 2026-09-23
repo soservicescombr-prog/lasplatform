@@ -1,0 +1,134 @@
+# netguard/docker-compose.yml
+# NetGuard - Docker Compose (Full Stack)
+# Uso: docker compose up -d
+
+services:
+  # === PostgreSQL ===
+  postgres:
+    image: postgres:16-alpine
+    container_name: netguard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-netguard}
+      POSTGRES_USER: ${POSTGRES_USER:-netguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netguard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - netguard-net
+
+  # === Redis ===
+  redis:
+    image: redis:7-alpine
+    container_name: netguard-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - netguard-net
+
+  # === Backend (FastAPI) ===
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: netguard-backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "8000:8000"
+      - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_PORT:-5514}/udp"
+      - "${SYSLOG_EXTERNAL_PORT:-514}:${SYSLOG_PORT:-5514}/tcp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # NOTA: Para scan de rede, o container precisa acesso à rede do host
+    # Em produção, use network_mode: host ou configure macvlan
+    networks:
+      - netguard-net
+
+  # === Celery Worker ===
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: netguard-celery-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # O worker usa a rede do host para enxergar a LAN em camada 2.
+      # PostgreSQL e Redis estão publicados apenas no loopback do host.
+      DB_HOST: 127.0.0.1
+      REDIS_HOST: 127.0.0.1
+    command: celery -A app.tasks worker -l info -c 4 -Q default,scans,snmp,alerts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    network_mode: host
+
+  # === Celery Beat (Scheduler) ===
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: netguard-celery-beat
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    command: celery -A app.tasks beat -l info
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - netguard-net
+
+  # === Frontend (React) ===
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: netguard-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - netguard-net
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+
+networks:
+  netguard-net:
+    driver: bridge

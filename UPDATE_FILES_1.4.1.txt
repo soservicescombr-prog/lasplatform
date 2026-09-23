@@ -1,0 +1,10 @@
+NetGuard 1.4.1 - arquivos do hotfix
+
+.env.example
+RELEASE_NOTES_1.4.1_LOGS_HOTFIX.md
+UPDATE_FILES_1.4.1.txt
+backend/app/config.py
+backend/app/database.py
+backend/app/services/log_service.py
+backend/tests/test_database_init.py
+backend/tests/test_syslog_service.py
