@@ -1,0 +1,77 @@
+name: NetGuard CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  # ===============================================================
+  # ETAPA 1: Validação de Código e Build (Executado na Nuvem GitHub)
+  # ===============================================================
+  code-quality-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js (Frontend)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validar e Compilar Frontend React
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Configurar Python (Backend)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Validar Sintaxe e Dependências Python
+        run: |
+          cd backend
+          python -m compileall -q app
+          pip install -r requirements.txt --dry-run
+
+  # ===============================================================
+  # ETAPA 2: Testes de Rede L2 e Deploy (Executado no Runner Local)
+  # ===============================================================
+  local-infrastructure-deploy:
+    needs: code-quality-and-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: self-hosted  # Aponta diretamente para sua VM/Servidor local
+
+    steps:
+      - name: Checkout do Código Localmente
+        uses: actions/checkout@v4
+
+      - name: Configurar Variáveis de Ambiente
+        run: |
+          if [ ! -f .env.production ]; then
+            chmod +x scripts/generate_secrets.sh
+            ./scripts/generate_secrets.sh
+          fi
+
+      - name: Executar Migrações do Banco (Alembic)
+        run: |
+          docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+
+      - name: Subir Stack Completo em Produção
+        run: |
+          docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+
+      - name: Validar Conectividade e Discovery em Camada 2
+        run: |
+          docker exec netguard-celery-worker nmap -sn 192.168.1.0/24 -oG - | grep "Up"
+
+      - name: Disparar Rollout dos Agentes via Ansible
+        run: |
+          ansible-playbook -i deploy/ansible/inventory.ini deploy/ansible/install_agent.yml
